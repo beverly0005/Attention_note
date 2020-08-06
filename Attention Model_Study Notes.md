@@ -1,0 +1,368 @@
+
+# Summary on Classical Attention Model (Steps)
+
+The common steps for an NLP model are as below:
++ Step 1: Preprocess Data
+    + Clean Data
+    + Custom Word Embedding (Optional)
++ Step 2: Split Sample
+    + Split Data
+    + Process Text Message of Data
++ Step 3: Build Model (Before Attention)
+    + Build Input Tensor and Embedding Layer
+    + Build Other Layers
++ Step 4: Build Model (Attention and Output)
+    + Create Attention Class
+    + Build Attention Layer
+    + Build Output Layer
++ Step 5: Train and Evaluate Result
+
+# Preprocess Data
+
+## Clean Data
+Either remove or replace some patterns from the text message
+
+## Custom Word Embedding (Optional)
+
+<font color='blue'> Need to import libraries below </font>
+1. Background package: `tensorflow` (here tensorflow1)
+
+`import tensorflow as tf
+ config = tf.ConfigProto()
+ config.gpu_options.allow_growth = True
+ seesion = tf.Session(config=config)`
+
+2. Word embedding package: `gensim`
+
+`from gensim.models import word2vec
+ from keras.preprocessing.text import Tokenizer`
+
+### First, collect and clean text message
+
+(Can use all the data, including test data.) Common practices involve:
++ convert all to lowercase
++ remove non-alphanumber symbols
++ remove leading and trailing space (strip)
++ remove whitespace using `\s` (i.e. blank, tab \t, and newline \r or \n)
++ drop duplicated sentences and empty sentences (e.g. '')
+
+### Second, convert text message into a list of lists of words (or letters)
+
+For example, convert the following message in a table:
+
+Description  |
+-------------|
+unicorn is a legendary creature|
+a beast with a single large, pointed, spiraling horn projecting from its forehead|
+in ancient seals of the Indus Valley Civilization|
+mentioned by the ancient Greeks in accounts of natural history by various writers|
+
+into:
+
++ **A LIST OF LISTS OF WORDS**: i.e.
+
+[['unicorn', 'is', 'a', 'legendary', 'creature'], ['a', 'beast', 'with', ..., 'forehead'], ['in', 'ancient', ..., 'Civilization'], ['mentioned', 'by', ..., 'writers']]
+
+**Code:** `sentences = [[j for j in i] for i in data["Description"].tolist()]`
+
++ **A LIST OF LISTS OF LETTERS**: i.e. 
+
+[['u', 'n', 'i', 'c', 'o', 'r', 'n', 'i', 's', ...,'r', 'e'], ...,['m', 'e', 'n', 't', 'i', 'o', 'n', 'e', 'd', ..., 'r', 's']]
+
+**Code**: `letters = [[j for k in i for j in k] for i in data["Description"].tolist()]`
+
+or equivalently
+
+`for i in data["Description"].tolist():
+    for k in i: 
+        for j in k:
+            letters.append(j)`
+        
+        
+        
+
+### Third, train and save word embedding model
+
+Need to decide:
++ dimension of output word embedding/word vector: `size`
++ use skip-gram (1) or continuous-bag-of-word (0) to train model: `sg` 
++ reading window (i.e. maximum distance between the current and predicted word within a sentence): `window`
++ whether to ignore words with total frequency lower than a threshold: `min_count`
++ whether to use hierarchical softmax (1) or not (0): `hs`
+
+For example, if we want to train a model using the list of lists of words `words`, and generate a 300x1 word vector as output:
+
+**Code**: 
+
+`embeddingmodel = word2vec.Word2Vec(words, sg=1, size=300, window=10, min_count=0, workers=cpu_count())
+ print(datetime.now())
+ embeddingmodel.train(words, total_examples=len(words), epochs=n_epoch)  
+ print(datetime.now())
+ embeddingmodel.save("BW_test_charembedding.pkl")`
+
+where `total_examples` is the number of sentences which were fed into the model
+
+### Fourth, tokenize the text message of training data
+
+Turn each text into a sequence of integer (each integer is the index of a token in a dictionary
+
+**Code**: For example, 
+
+`tokenizer = Tokenizer(char_level=True, lower=False)`          
+-- Create a class of Tokenizer, if `char_level=True`, then every character will be treated as a token
+
+`tokenizer.fit_on_texts(data['Description'].tolist())`     
+-- Updates internal vocabulary based on data['Description']. Then, `tokenizer` will have 2 attributes:
++ `word_count`: the frequency of a word in the data['Description']
++ `word_index`: the index of a word in the vocabulary composed of words of data['Description']
+
+For instance, `tokenizer.word_count` is a dictionary like `OrderedDict([('a', 64953), ('b', 288372), ...])`. `tokenizer.word_index` is a dictionary like `{'a': 1, 'b': 2, ...}`.
+
+### Fifth, create embedding_matrix to convert the input data into custom word vector later
+
+For each text in the vocabulary of `tokenizer` obtained above, use `embeddingmodel` trained above to convert it into custom word vectors.
+
+**Code**: For example
+
+`embedding_matrix = np.zeros((len(embeddingmodel.wv.vocab)+1, 300))`   
+-- create an empty matrix (# of words in the vocabulary, dimension of custom word vector)
+
+`for word, i in tokenizer.word_index.items():
+    embedding_vector = embeddingmodel.wv[word]
+    embedding_matrix[i] = embedding_vector`   
+-- for each word in the vocabulary of `tokenizer`, find its specific word vector generated by `embeddingmodel`
+
+### Note: `embedding_matrix` will be used later in the model layer
+
+## Split Sample
+
+<font color='blue'> Need to import the libraries below </font>: 
+
+1. Split sample: `sklearn`
+
+`from sklearn.model_selection import train_test_split`
+
+2. Process text: `keras`
+
+`from keras.preprocessing import sequence`
+
+### Split the data into train, val, test
+
+**Code**: For example, to split into train and test. Similarly, we can split train into new train and validation.
+
+`train_x, test_x, train_y, test_y = train_test_split(data['Description'], data['Label'],
+       test_size=0.1, stratify = data['Label'], random_state=100)`
+
+
+### Process the text message of data
+
+Convert text message of data into a sequence of integers, and add leading zeros to ensure the length of sequence for each record is the same.
+
+**Code**: For example, train_x and val_x can be done in the following way, too.
+
+`word_list_test = tokenizer.texts_to_sequences(test_x.tolist())`   
+-- use `tokenizer` obtained before to convert each text in texts to a sequence of integers which are the index of words in the vocabulary.
+
+For instance, `word_list_test` is a list of lists like `[[1, 2, 10, 3], [3, 100, 23, 21, 10, 10, 1], ...]`
+
+`pad_word_list_test = sequence.pad_sequences(mapped_list_test, maxlen=200)`   
+-- add leading zeros in the each list of `word_list_test` to ensure all the lists of `word_list_test` have the same length 200. 200 is the maximum number of words in a sentence which will be put into a model.
+
+For instance, `pad_word_list_test` is a list lists like `[[0, 0, ..., 0, 1, 2, 10, 3], [0, 0, ..., 0, 3, 100, 23, 21, 10, 10, 1], ...]` where each list inside has 200 elements. That is, `[0, 0, ..., 0, 1, 2, 10, 3]` has 196 leading zeros.
+
+
+## Build Model (Before Attention)
+
+<font color='blue'> Need to import libraries below </font>:
+1. Build layer: `keras`
+
+`from keras.layers import *
+from keras.models import *
+from keras.layers.embeddings import Embedding`
+
+### Build Input Tensor and Embedding Layer (First Layer)
+
+Create input placehold and embedding layer as the first part of model.
+
+**Code**: For example
+
+`input=Input(shape=(200,), dtype="int32")`   
+-- create `Input` tensor, which is going to put `train_x`. Cut off each sequence of `train_x` to 200 if it is too long.
+
+For instance, `train_x` is `[[0, 0, ..., 0, 1, 2, 10, 3], [0, 0, ..., 0, 3, 100, 23, 21, 10, 10, 1], ...]`. For each sequence inside, e.g. `[0, 0, ..., 0, 1, 2, 10, 3]`, its length should be 200.
+
+`embedding=Embedding(embedding_matrix.shape[0], embedding_matrix.shape[1], 
+          weights=[embedding_matrix], input_length=200)(inputs)`   
+-- create `Embedding` tensor, where to use the custom word vector weights `embedding_matrix` obtained before to convert `inputs` into custom word embedding. The length of each sequence of `inputs` should be 200.
+
+For instance, the first sequence of `train_x` is a 1x200 sequence `[0, 0, ..., 0, 1, 2, 10, 3]`. Going through `embedding` layer, this sequence will become 300x200 matrix, where `300` is the dimension of custom word vector we trained before
+
+### Build Other Model Layers Before Attention
+
+For example, build `Bidrectional LSTM` before `Attention`. Its output will become input of `Attention` layer.
+
+**Code**: 
+
+`lstm_out=Bidirectional(LSTM(128, return_sequences=True))(embedding)`   
+--create layers before `Attention` layer which is composed by 128 units. If `return_sequences=True`, `lstm_out` will be the output the this layer. 
+
+## Build Model (Attention and Output)
+
+<font color='blue'>Need to import libraries below: </font>
+
+`from keras import backend as K
+from keras.engine.topology import Layer
+from keras import initializers, regularizers, constraints`
+
+### Create Attention Class
+
+From Kaggle:
++ Obtain all attributes of `Attention` class from keras.
++ Add and initialize `weight` and `bias` for `Attention` class
++ Create the structure inside `Attention` class: it uses `weight` and `bias` to compute the `attention` for each text of `input`, where `attention` of all texts should sum up to 1. In the end, it outputs a text weighted by `attention`.
+
+**Code**:
+
+`class Attention(Layer):
+    def __init__(self, step_dim,
+                 W_regularizer=None, b_regularizer=None,
+                 W_constraint=None, b_constraint=None,
+                 bias=True, **kwargs):
+        """
+        Keras Layer that implements an Attention mechanism for temporal data.
+        Supports Masking.
+        Follows the work of Raffel et al. [https://arxiv.org/abs/1512.08756]
+        Input shape
+            3D tensor with shape: (samples, steps, features).
+        Output shape
+            2D tensor with shape: (samples, features).
+        :param kwargs:
+        Just put it on top of an RNN Layer (GRU/LSTM/SimpleRNN) with return_sequences=True.
+        The dimensions are inferred based on the output shape of the RNN.
+        Example:
+            model.add(LSTM(64, return_sequences=True))
+            model.add(Attention())
+        """
+        self.supports_masking = True
+        self.init = initializers.get('glorot_uniform')`
+        
+        self.W_regularizer = regularizers.get(W_regularizer)
+        self.b_regularizer = regularizers.get(b_regularizer)
+
+        self.W_constraint = constraints.get(W_constraint)
+        self.b_constraint = constraints.get(b_constraint)
+
+        self.bias = bias
+        self.step_dim = step_dim
+        self.features_dim = 0
+        super(Attention, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        assert len(input_shape) == 3
+
+        self.W = self.add_weight((input_shape[-1],),
+                                 initializer=self.init,
+                                 name='{}_W'.format(self.name),
+                                 regularizer=self.W_regularizer,
+                                 constraint=self.W_constraint)
+        self.features_dim = input_shape[-1]
+
+        if self.bias:
+            self.b = self.add_weight((input_shape[1],),
+                                     initializer='zero',
+                                     name='{}_b'.format(self.name),
+                                     regularizer=self.b_regularizer,
+                                     constraint=self.b_constraint)
+        else:
+            self.b = None
+
+        self.built = True
+
+    def compute_mask(self, input, input_mask=None):
+        # do not pass the mask to the next layers
+        return None
+
+    def call(self, x, mask=None):
+        # eij = K.dot(x, self.W) TF backend doesn't support it
+
+        # features_dim = self.W.shape[0]
+        # step_dim = x._keras_shape[1]
+
+        features_dim = self.features_dim
+        step_dim = self.step_dim
+
+        eij = K.reshape(K.dot(K.reshape(x, (-1, features_dim)), 
+                              K.reshape(self.W, (features_dim, 1))), 
+                        (-1, step_dim))
+
+        if self.bias:
+            eij += self.b
+
+        eij = K.tanh(eij)
+
+        a = K.exp(eij)
+
+        # apply mask after the exp. will be re-normalized next
+        if mask is not None:
+            # Cast the mask to floatX to avoid float64 upcasting in theano
+            a *= K.cast(mask, K.floatx())
+
+        # in some cases especially in the early stages of training the sum may be almost zero
+        a /= K.cast(K.sum(a, axis=1, keepdims=True) + K.epsilon(), K.floatx())
+
+        a = K.expand_dims(a)
+        weighted_input = x * a
+    #print weigthted_input.shape
+        return K.sum(weighted_input, axis=1)
+
+    def compute_output_shape(self, input_shape):
+        #return input_shape[0], input_shape[-1]
+        return input_shape[0],  self.features_dim
+
+### Build Attention Layer (Block)
+
+After create `Attention` class, run the `Attention` layer. Here, we also add two more layers:
++ Dense layer
++ BatchNormalization
+
+**Code**: For example,
+
+`attention=Attention(max_review_length)(lstm_out)
+attention=Dense(units=256, activation="relu")(attention)
+attention=BatchNormalization()(attention)`
+
+### Build Output Layer
+
+The final layer is `output` layer, where the number of `units` should be the dimension of output.
+
+**Code**: For example
+
+`output=Dense(units=output_dim, activation='softmax')(attention)
+model=Model(input=[inputs], output=output)`
+
+## Train and Evaluate Result
+
+### Define Metrics
+
+Use `compile` to define the metrics of model
+
+**Code**: For example
+
+`model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+ cb = EarlyStopping(monitor='val_loss', min_delta=0.001, patience=3, verbose=0, 
+                   mode='auto', restore_best_weights=True)`
+
+`model.summary()`   
+-- check the model structure
+
+### Train Model
+
+**Code**: For example,
+
+`model.fit(X_train, y_train, epochs=50, batch_size=256, callbacks=[cb], validation_split=0.1)`   
+-- `batch_size`: Number of samples per gradient update. If unspecified, `batch_size` will default to 32.
+
+
+```python
+
+```
